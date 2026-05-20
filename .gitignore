@@ -1,9 +1,18 @@
+# checkpoints / models
 *.pth
 *.pt
 *.ckpt
 checkpoints/
+
+# outputs
 logs/
 outputs/
 wandb/
+
+# python
 __pycache__/
 *.pyc
+*.pyo
+
+# system
+.DS_Store
