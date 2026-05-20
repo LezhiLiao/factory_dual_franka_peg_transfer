@@ -65,18 +65,28 @@ The script writes HDF5 and MP4 files to:
 outputs/factory_dual_franka_peg_transfer_thin/
 ```
 
-## Git Note
+## Checkpoint
 
-`Factory.pth` is about 204 MB. Track it with Git LFS instead of normal Git:
+The trained checkpoint (`Factory.pth`, ~204 MB) is hosted on Hugging Face instead of GitHub.
+
+Download it with:
 
 ```bash
-git lfs track "checkpoints/**/*.pth"
-git add .gitattributes checkpoints/Factory/test/nn/Factory.pth
+pip install -U "huggingface_hub[cli]"
+
+hf auth login
+
+bash factory_dual_franka_peg_transfer_bundle/scripts/download_ckpt.sh
 ```
 
-The latest verified command produced:
+Or manually:
 
-```text
-inserted: true
-success: true
+```bash
+hf download Heiheiheidashuai/factory_dual_franka_peg_transfer_ckpt \
+  --repo-type model \
+  --local-dir .
 ```
+
+Checkpoint repository:
+
+https://huggingface.co/Heiheiheidashuai/factory_dual_franka_peg_transfer_ckpt
