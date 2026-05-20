@@ -1,0 +1,9 @@
+*.pth
+*.pt
+*.ckpt
+checkpoints/
+logs/
+outputs/
+wandb/
+__pycache__/
+*.pyc
