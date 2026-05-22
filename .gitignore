@@ -4,6 +4,14 @@
 *.ckpt
 checkpoints/
 
+# local keys / credentials
+\# 显示公钥内容*
+*.pem
+*.key
+
+# local handoff bundle copy
+handoff/
+
 # outputs
 logs/
 outputs/
