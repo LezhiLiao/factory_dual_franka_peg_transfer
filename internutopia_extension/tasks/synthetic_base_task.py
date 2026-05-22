@@ -30,6 +30,12 @@ def add_synthetic_data_args(parser):
     parser.add_argument("--video_width", type=int, default=640, help="Viewer render width.")
     parser.add_argument("--video_height", type=int, default=480, help="Viewer render height.")
     parser.add_argument("--video_frame_repeat", type=int, default=3, help="Repeat each captured RGB frame in the MP4.")
+    parser.add_argument(
+        "--record_camera",
+        choices=("viewer", "franka1_wrist_viewer", "franka2_wrist_viewer", "franka1_d455", "franka2_d455"),
+        default="viewer",
+        help="Camera source used for MP4 frames. Non-viewer modes also save observations/wrist_rgb in HDF5.",
+    )
     parser.add_argument("--viewer_eye", type=float, nargs=3, default=DEFAULT_VIEWER_EYE, help="Viewer camera eye.")
     parser.add_argument(
         "--viewer_lookat", type=float, nargs=3, default=DEFAULT_VIEWER_LOOKAT, help="Viewer camera target."
@@ -64,6 +70,7 @@ class SyntheticRolloutBuffer:
     action: list[np.ndarray] = field(default_factory=list)
     success: list[np.ndarray] = field(default_factory=list)
     observations: dict[str, list[np.ndarray]] = field(default_factory=dict)
+    image_observations: dict[str, list[np.ndarray]] = field(default_factory=dict)
     frames: list[np.ndarray] = field(default_factory=list)
 
     def append(
@@ -72,6 +79,7 @@ class SyntheticRolloutBuffer:
         action: np.ndarray,
         success: np.ndarray,
         observations: dict[str, np.ndarray],
+        image_observations: dict[str, np.ndarray] | None,
         frame: np.ndarray | None,
         frame_repeat: int,
     ):
@@ -80,6 +88,8 @@ class SyntheticRolloutBuffer:
         self.success.append(success)
         for name, value in observations.items():
             self.observations.setdefault(name, []).append(value)
+        for name, value in (image_observations or {}).items():
+            self.image_observations.setdefault(name, []).append(value)
         if frame is not None:
             rgb = to_rgb_array(frame)
             for _ in range(max(1, int(frame_repeat))):
@@ -103,6 +113,8 @@ class SyntheticRolloutBuffer:
             obs_group = h5.create_group("observations")
             for name, values in sorted(self.observations.items()):
                 obs_group.create_dataset(name, data=np.asarray(values, dtype=np.float32), compression="gzip")
+            for name, values in sorted(self.image_observations.items()):
+                obs_group.create_dataset(name, data=np.asarray(values, dtype=np.uint8), compression="gzip")
 
     def save_video(self, path: str, fps: int):
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -205,6 +217,7 @@ class SyntheticDataBaseTask:
         output_dir: str,
         video_fps: int,
         video_frame_repeat: int,
+        record_camera: str = "viewer",
         viewer_eye=DEFAULT_VIEWER_EYE,
         viewer_lookat=DEFAULT_VIEWER_LOOKAT,
     ):
@@ -218,6 +231,7 @@ class SyntheticDataBaseTask:
         self.output_dir = output_dir
         self.video_fps = video_fps
         self.video_frame_repeat = video_frame_repeat
+        self.record_camera = record_camera
         self.viewer_eye = tuple(viewer_eye)
         self.viewer_lookat = tuple(viewer_lookat)
         self.rollout = SyntheticRolloutBuffer()
@@ -238,18 +252,24 @@ class SyntheticDataBaseTask:
     def record(self, phase: int, action=None):
         if hasattr(self.raw, "_compute_intermediate_values"):
             self.raw._compute_intermediate_values(self.raw.physics_dt)
+        self.prepare_render_camera()
+        frame = self.render_frame()
         self.rollout.append(
             phase=phase,
             action=self._action_array(action),
             success=self.success_array(),
             observations=self.collect_observations(),
-            frame=self.render_frame(),
+            image_observations=self.collect_image_observations(frame),
+            frame=frame,
             frame_repeat=self.video_frame_repeat,
         )
 
+    def prepare_render_camera(self):
+        pass
+
     def collect_observations(self) -> dict[str, np.ndarray]:
         raw = self.raw
-        return {
+        observations = {
             "joint_pos": to_numpy(raw.joint_pos),
             "joint_vel": to_numpy(raw.joint_vel),
             "ee_pos": to_numpy(raw.fingertip_midpoint_pos),
@@ -262,9 +282,26 @@ class SyntheticDataBaseTask:
             "held_pos": to_numpy(raw.held_pos),
             "held_quat": to_numpy(raw.held_quat),
         }
+        if hasattr(raw, "robot2_fingertip_midpoint_pos"):
+            observations.update(
+                {
+                    "robot2_joint_pos": to_numpy(raw.robot2_joint_pos),
+                    "robot2_joint_vel": to_numpy(raw.robot2_joint_vel),
+                    "robot2_ee_pos": to_numpy(raw.robot2_fingertip_midpoint_pos),
+                    "robot2_ee_quat": to_numpy(raw.robot2_fingertip_midpoint_quat),
+                    "robot2_ee_linvel": to_numpy(raw.robot2_fingertip_midpoint_linvel),
+                    "robot2_ee_angvel": to_numpy(raw.robot2_fingertip_midpoint_angvel),
+                }
+            )
+        return observations
 
     def render_frame(self) -> np.ndarray:
         return to_rgb_array(self.raw_env.render())
+
+    def collect_image_observations(self, frame: np.ndarray) -> dict[str, np.ndarray]:
+        if self.record_camera == "viewer":
+            return {}
+        return {"wrist_rgb": to_rgb_array(frame)}
 
     def success_array(self) -> np.ndarray:
         return np.asarray([[float(self.check_success(require=False))]], dtype=np.float32)
@@ -285,6 +322,7 @@ class SyntheticDataBaseTask:
             "viewer_lookat": list(self.viewer_lookat),
             "video_fps": self.video_fps,
             "video_frame_repeat": self.video_frame_repeat,
+            "record_camera": self.record_camera,
             "phase_names": phase_names,
             "success": success,
         }

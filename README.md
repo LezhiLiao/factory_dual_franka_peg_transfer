@@ -1,14 +1,20 @@
-# Factory Dual-Franka Peg Transfer Bundle
+# Factory Dual-Franka Transfer Bundle
 
 This bundle contains the task code, desk asset, and RL checkpoint for the
-IsaacLab dual-Franka peg-transfer synthetic-data task.
+IsaacLab dual-Franka peg-transfer and nut-transfer synthetic-data tasks.
+
+## Demo
+
+<video src="video/factory_dual_franka_peg_transfer_planned_20260520_091622_success.mp4" controls width="100%"></video>
 
 ## Contents
 
 - `scripts/synthetic_factory_dual_franka_peg_transfer_thin.py`
-  - Recommended RobotWin-style thin task entrypoint.
-- `scripts/synthetic_factory_dual_franka_peg_transfer_planned.py`
-  - Golden single-file reference version that has the same behavior.
+  - RobotWin-style thin entrypoint for the dual-Franka peg-transfer task.
+- `scripts/synthetic_factory_dual_franka_nut_transfer_thin.py`
+  - RobotWin-style thin entrypoint for the dual-Franka nut-transfer task.
+  - Franka2 closed gripper width is fixed at `0.01`.
+  - Franka2 nut grasp height is shifted down by `5 mm`.
 - `internutopia_extension/tasks/synthetic_base_task.py`
   - Checkpoint loading, reset, recording, HDF5, and MP4 helpers.
 - `internutopia_extension/tasks/isaac_motion_primitives.py`
@@ -19,7 +25,7 @@ IsaacLab dual-Franka peg-transfer synthetic-data task.
 - `asset/desk005/`
   - Desk USD and material resource used by the task.
 - `checkpoints/Factory/test/nn/Factory.pth`
-  - RL-Games Factory peg-insert checkpoint.
+  - RL-Games Factory checkpoint used by the transfer rollouts.
 - `checkpoints/Factory/test/params/`
   - Agent and env config snapshots from training.
 
@@ -43,7 +49,7 @@ IsaacLab/source/isaaclab_rl
 IsaacLab/source/isaaclab_tasks
 ```
 
-## Run
+## Run Peg Transfer
 
 From the repo root:
 
@@ -52,8 +58,10 @@ source /data/user/miniconda3/etc/profile.d/conda.sh
 conda activate internutopia
 source /data/user/isaacsim/setup_conda_env.sh
 python scripts/synthetic_factory_dual_franka_peg_transfer_thin.py \
+  --num_envs 1 \
+  --device cuda:0 \
   --headless \
-  --enable_cameras \
+  --disable_fabric \
   --checkpoint checkpoints/Factory/test/nn/Factory.pth \
   --video_frame_repeat 1 \
   --hold_steps 8
@@ -65,28 +73,43 @@ The script writes HDF5 and MP4 files to:
 outputs/factory_dual_franka_peg_transfer_thin/
 ```
 
-## Checkpoint
+## Run Nut Transfer
 
-The trained checkpoint (`Factory.pth`, ~204 MB) is hosted on Hugging Face instead of GitHub.
-
-Download it with:
+From the repo root:
 
 ```bash
-pip install -U "huggingface_hub[cli]"
-
-hf auth login
-
-bash factory_dual_franka_peg_transfer_bundle/scripts/download_ckpt.sh
+source /data/user/miniconda3/etc/profile.d/conda.sh
+conda activate internutopia
+source /data/user/isaacsim/setup_conda_env.sh
+python scripts/synthetic_factory_dual_franka_nut_transfer_thin.py \
+  --num_envs 1 \
+  --device cuda:0 \
+  --headless \
+  --disable_fabric \
+  --checkpoint checkpoints/Factory/test/nn/Factory.pth \
+  --record_camera franka2_d455 \
+  --video_frame_repeat 1 \
+  --output_dir outputs/factory_dual_franka_nut_transfer_rl_debug \
+  --wrist_camera_rotate_zyx 0 90 180
 ```
 
-Or manually:
+The script writes HDF5 and MP4 files to the `--output_dir` path.
+
+## Git Note
+
+`Factory.pth` is about 204 MB. Track it with Git LFS instead of normal Git:
 
 ```bash
-hf download Heiheiheidashuai/factory_dual_franka_peg_transfer_ckpt \
-  --repo-type model \
-  --local-dir .
+git lfs track "checkpoints/**/*.pth"
+git add .gitattributes checkpoints/Factory/test/nn/Factory.pth
 ```
 
-Checkpoint repository:
+The latest verified command produced:
 
-https://huggingface.co/Heiheiheidashuai/factory_dual_franka_peg_transfer_ckpt
+```text
+inserted: true
+success: true
+```
+
+For nut transfer, the current script records the transfer rollout after Franka1
+threads the nut and Franka2 grasps, reverse-twists, lifts, and returns home.
