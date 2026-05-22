@@ -5,7 +5,9 @@ IsaacLab dual-Franka peg-transfer and nut-transfer synthetic-data tasks.
 
 ## Demo
 
-<video src="video/factory_dual_franka_peg_transfer_planned_20260520_091622_success.mp4" controls width="100%"></video>
+[![Factory Dual-Franka Peg Transfer Demo](video/demo_preview.png)](video/factory_dual_franka_peg_transfer_planned_20260520_091622_success.mp4)
+
+[Watch the demo video](video/factory_dual_franka_peg_transfer_planned_20260520_091622_success.mp4)
 
 ## Contents
 
