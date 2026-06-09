@@ -1,7 +1,8 @@
 # Factory Dual-Franka Transfer Bundle
 
-This bundle contains the task code, desk asset, and RL checkpoint for the
-IsaacLab dual-Franka peg-transfer and nut-transfer synthetic-data tasks.
+This bundle contains the task code and assets for the IsaacLab dual-Franka
+peg-transfer and nut-transfer synthetic-data tasks. The checkpoint is hosted
+separately on HuggingFace.
 
 ## Demo
 
@@ -17,19 +18,21 @@ IsaacLab dual-Franka peg-transfer and nut-transfer synthetic-data tasks.
   - RobotWin-style thin entrypoint for the dual-Franka nut-transfer task.
   - Franka2 closed gripper width is fixed at `0.01`.
   - Franka2 nut grasp height is shifted down by `5 mm`.
+- `scripts/factory_dual_franka_peg_transfer_atomic_skills.py`
+  - Shared task-level skills used by both thin entrypoints.
 - `internutopia_extension/tasks/synthetic_base_task.py`
   - Checkpoint loading, reset, recording, HDF5, and MP4 helpers.
 - `internutopia_extension/tasks/isaac_motion_primitives.py`
   - Reusable motion primitives: hold, joint trajectory, robot2 grasp, pull,
-    gripper, and Factory IK.
+    gripper, wrist twist, release lift, and Factory IK.
 - `internutopia_extension/tasks/factory_dual_franka_env.py`
-  - Dual-Franka Factory scene, desk005 placement, and Gym registration.
+  - Dual-Franka Factory scene, desk005 placement, D455 wrist-camera USD setup,
+    and Gym registration for peg and nut tasks.
 - `asset/desk005/`
   - Desk USD and material resource used by the task.
-- `checkpoints/Factory/test/nn/Factory.pth`
-  - RL-Games Factory checkpoint used by the transfer rollouts.
-- `checkpoints/Factory/test/params/`
-  - Agent and env config snapshots from training.
+- `asset/franka/` and `asset/ur5e_robotiq/`
+  - D455 wrist-camera wrapper and payload assets used by `franka1_d455` and
+    `franka2_d455` recording modes.
 
 ## Expected Repo Layout
 
@@ -97,13 +100,18 @@ python scripts/synthetic_factory_dual_franka_nut_transfer_thin.py \
 
 The script writes HDF5 and MP4 files to the `--output_dir` path.
 
-## Git Note
+## Checkpoint
 
-`Factory.pth` is about 204 MB. Track it with Git LFS instead of normal Git:
+The checkpoint is not stored in this GitHub repository. Download it from:
 
-```bash
-git lfs track "checkpoints/**/*.pth"
-git add .gitattributes checkpoints/Factory/test/nn/Factory.pth
+```text
+https://huggingface.co/Heiheiheidashuai/factory_dual_franka_peg_transfer_ckpt
+```
+
+Place `Factory.pth` at:
+
+```text
+checkpoints/Factory/test/nn/Factory.pth
 ```
 
 The latest verified command produced:

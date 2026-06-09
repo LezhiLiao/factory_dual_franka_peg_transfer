@@ -1,0 +1,30 @@
+#usda 1.0
+(
+    defaultPrim = "Root"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "Root" (
+    prepend payload = @http://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.5/Isaac/IsaacLab/Factory/franka_mimic.usd@
+)
+{
+    over "panda_hand"
+    {
+        def Xform "realsense" (
+            prepend payload = @/data/user/InternUtopia/asset/ur5e_robotiq/ur5e_robotiq_2f85_fixed_camera/SubUSDs/rsd455.usd@
+        )
+        {
+            double3 xformOp:rotateZYX = (0.0, 90.0, 180.0)
+            double3 xformOp:translate = (0.05, 0.0, -0.02)
+            double3 xformOp:scale = (1, 1, 1)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateZYX", "xformOp:scale"]
+
+            over "RSD455" (
+                delete apiSchemas = ["PhysicsRigidBodyAPI", "PhysxRigidBodyAPI"]
+            )
+            {
+            }
+        }
+    }
+}

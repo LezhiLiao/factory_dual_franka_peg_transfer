@@ -37,11 +37,12 @@ except ImportError:
 from isaaclab.app import AppLauncher
 
 
-DEFAULT_CHECKPOINT = os.path.join(_PROJECT_ROOT, "checkpoints", "Factory", "test", "nn", "Factory.pth")
-DEFAULT_OUTPUT_DIR = os.path.join(_PROJECT_ROOT, "outputs", "factory_dual_franka_peg_transfer_thin")
+DEFAULT_CHECKPOINT = "/data/user/InternUtopia/IsaacLab/logs/rl_games/Factory/test/nn/Factory.pth"
+DEFAULT_OUTPUT_DIR = "/data/user/InternUtopia/outputs/factory_dual_franka_peg_transfer_thin"
 FRANKA_RESET_JOINT_POS = (0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785)
 ROBOT2_INITIAL_JOINT_POS = (0.0015178, -0.19651, -0.0014364, -1.9761, -0.00027717, 1.7796, 0.78556)
 ROBOT2_GRASP_Z_OFFSET = 0.025
+WRIST_CAMERA_LOCAL_OFFSET = (0.05, 0.0, -0.02)
 
 
 parser = argparse.ArgumentParser(description="Thin dual-Franka Factory peg transfer rollout.")
@@ -57,8 +58,24 @@ parser.add_argument("--robot2_ik_substeps", type=int, default=8, help="Joint int
 parser.add_argument("--hold_steps", type=int, default=12, help="Extra steps to keep a target after reaching it.")
 parser.add_argument("--approach_height", type=float, default=0.12, help="Franka2 approach height above the peg.")
 parser.add_argument("--pull_height", type=float, default=0.20, help="Franka2 upward pull distance after grasp.")
+parser.add_argument("--release_lift_height", type=float, default=0.07, help="Franka1 vertical lift distance before reset.")
+parser.add_argument("--release_lift_steps", type=int, default=36, help="IK waypoints for Franka1 vertical lift before reset.")
 parser.add_argument("--stop_on_success", action="store_true", default=True, help="Stop insertion once success is true.")
 parser.add_argument("--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O.")
+parser.add_argument(
+    "--wrist_camera_translate",
+    type=float,
+    nargs=3,
+    default=(0.05, 0.0, -0.02),
+    help="D455 pose translation under panda_hand.",
+)
+parser.add_argument(
+    "--wrist_camera_rotate_zyx",
+    type=float,
+    nargs=3,
+    default=(0.0, 90.0, 180.0),
+    help="D455 pose rotationZYX under panda_hand, in degrees.",
+)
 from internutopia_extension.tasks.synthetic_base_task import add_synthetic_data_args
 
 add_synthetic_data_args(parser)
@@ -78,6 +95,7 @@ from pxr import Gf, UsdGeom
 
 import isaaclab_tasks  # noqa: F401
 from isaaclab.envs import DirectMARLEnvCfg, DirectRLEnvCfg, ManagerBasedRLEnvCfg
+from isaaclab.utils.math import quat_apply
 from isaaclab_tasks.utils.hydra import hydra_task_config
 from internutopia_extension.tasks.factory_dual_franka_env import (
     DUAL_TASK_ID,
@@ -90,18 +108,20 @@ from internutopia_extension.tasks.synthetic_base_task import (
     configure_viewer,
     create_rl_games_checkpoint_skill,
 )
+from factory_dual_franka_peg_transfer_atomic_skills import FactoryPegTransferAtomicSkills
 
 
 register_dual_franka_factory_env()
 
 
-class DualFrankaPegTransferTask(IsaacDualFrankaMotionMixin, SyntheticDataBaseTask):
+class DualFrankaPegTransferTask(FactoryPegTransferAtomicSkills, IsaacDualFrankaMotionMixin, SyntheticDataBaseTask):
     PHASE_INSERT = 0
     PHASE_FRANKA1_RELEASE_HOME = 1
-    PHASE_FRANKA2_PREGRASP = 2
-    PHASE_FRANKA2_DESCEND = 3
-    PHASE_FRANKA2_GRASP = 4
-    PHASE_FRANKA2_EXTRACT = 5
+    PHASE_FRANKA1_RELEASE_LIFT = 2
+    PHASE_FRANKA2_PREGRASP = 3
+    PHASE_FRANKA2_DESCEND = 4
+    PHASE_FRANKA2_GRASP = 5
+    PHASE_FRANKA2_EXTRACT = 6
 
     def __init__(
         self,
@@ -110,6 +130,8 @@ class DualFrankaPegTransferTask(IsaacDualFrankaMotionMixin, SyntheticDataBaseTas
         extract_steps: int,
         approach_height: float,
         pull_height: float,
+        release_lift_height: float,
+        release_lift_steps: int,
         home_steps: int,
         gripper_steps: int,
         robot2_ik_substeps: int,
@@ -122,6 +144,8 @@ class DualFrankaPegTransferTask(IsaacDualFrankaMotionMixin, SyntheticDataBaseTas
         self.extract_steps = extract_steps
         self.approach_height = approach_height
         self.pull_height = pull_height
+        self.release_lift_height = release_lift_height
+        self.release_lift_steps = release_lift_steps
         self.home_steps = home_steps
         self.gripper_steps = gripper_steps
         self.robot2_ik_substeps = robot2_ik_substeps
@@ -132,28 +156,40 @@ class DualFrankaPegTransferTask(IsaacDualFrankaMotionMixin, SyntheticDataBaseTas
         self._peg_grasp_quat = None
         self._franka1_hold_joint_pos = None
         self._robot2_hold_joint_pos = None
+        self.franka1_home_joint_pos = FRANKA_RESET_JOINT_POS
+        self.franka2_home_joint_pos = ROBOT2_INITIAL_JOINT_POS
 
     def play_once(self):
         obs = self.reset_scene()
         self.table_length = self.measure_table_length()
         self.prepare_robot2_home_hold(ROBOT2_INITIAL_JOINT_POS)
 
-        self.run_checkpoint_policy_with_holds(
+        _, inserted = self.insert_peg(
             obs=obs,
-            phase=self.PHASE_INSERT,
+            robot="franka1",
+            hole_marker="hole",
             max_steps=self.insert_steps,
-            stop_on_success=self.stop_on_success,
         )
-        inserted = self.check_success(require=False)
         if inserted:
-            self.open_gripper_and_move_joints(
+            self.release_lift(
                 robot="franka1",
-                joint_pos=FRANKA_RESET_JOINT_POS,
-                gripper_width=self.raw.cfg_task.held_asset_cfg.diameter / 2 * 1.25,
-                steps=self.home_steps,
-                phase=self.PHASE_FRANKA1_RELEASE_HOME,
+                lift_height=self.release_lift_height,
             )
-            self.franka2_grasp_and_extract()
+            self.return_home(robot="franka1")
+            grasp_pos = self.grasp(
+                robot="franka2",
+                target_marker="peg",
+                pregrasp_distance=self.approach_height,
+                move_steps=self.extract_steps,
+                grasp_z_offset=ROBOT2_GRASP_Z_OFFSET,
+            )
+            self.extract(
+                robot="franka2",
+                reference_marker="hole",
+                grasp_pos=grasp_pos,
+                pull_height=self.pull_height,
+                steps=self.extract_steps,
+            )
 
         success = inserted and self.check_extracted()
         dataset_path, video_path = self.finish_episode(success)
@@ -171,30 +207,6 @@ class DualFrankaPegTransferTask(IsaacDualFrankaMotionMixin, SyntheticDataBaseTas
         }
         return self.info
 
-    def franka2_grasp_and_extract(self):
-        self.raw._compute_intermediate_values(self.raw.physics_dt)
-        peg_pos = self.raw.held_pos.clone()
-        hole_pos = self.raw.fixed_pos_obs_frame.clone()
-        down_quat = self.robot2_down_quat()
-        grasp_pos = self.robot2_grasp_actor(
-            peg_pos=peg_pos,
-            target_quat=down_quat,
-            pregrasp_height=self.approach_height,
-            grasp_z_offset=ROBOT2_GRASP_Z_OFFSET,
-            move_steps=self.extract_steps,
-            pregrasp_phase=self.PHASE_FRANKA2_PREGRASP,
-            descend_phase=self.PHASE_FRANKA2_DESCEND,
-            grasp_phase=self.PHASE_FRANKA2_GRASP,
-        )
-        self.robot2_pull_actor(
-            hole_pos=hole_pos,
-            grasp_pos=grasp_pos,
-            target_quat=down_quat,
-            pull_height=self.pull_height,
-            steps=self.extract_steps,
-            phase=self.PHASE_FRANKA2_EXTRACT,
-        )
-
     def check_success(self, require: bool = True) -> bool:
         self.raw._compute_intermediate_values(self.raw.physics_dt)
         success = self.raw._get_curr_successes(self.raw.cfg_task.success_threshold, check_rot=False)
@@ -207,6 +219,34 @@ class DualFrankaPegTransferTask(IsaacDualFrankaMotionMixin, SyntheticDataBaseTas
         self.raw._compute_intermediate_values(self.raw.physics_dt)
         return bool((self.raw.held_pos[0, 2] - self.raw.fixed_pos_obs_frame[0, 2]).item() > 0.08)
 
+    def prepare_render_camera(self):
+        if self.record_camera in ("viewer", "franka1_d455", "franka2_d455"):
+            return
+
+        self.raw._compute_intermediate_values(self.raw.physics_dt)
+        env_origin = self.raw.scene.env_origins[0]
+        offset = torch.tensor(WRIST_CAMERA_LOCAL_OFFSET, dtype=torch.float32, device=self.raw.device)
+
+        if self.record_camera == "franka2_wrist_viewer":
+            wrist_pos = self.raw.robot2_fingertip_midpoint_pos[0] + env_origin
+            wrist_quat = self.raw.robot2_fingertip_midpoint_quat[0]
+            target_pos = self.raw.held_pos[0] + env_origin
+        else:
+            wrist_pos = self.raw.fingertip_midpoint_pos[0] + env_origin
+            wrist_quat = self.raw.fingertip_midpoint_quat[0]
+            target_pos = self.raw.fixed_pos_obs_frame[0] + env_origin
+
+        eye = wrist_pos + quat_apply(wrist_quat.unsqueeze(0), offset.unsqueeze(0)).squeeze(0)
+        target = target_pos
+        if torch.linalg.norm(target - eye).item() < 0.03:
+            forward = torch.tensor((0.20, 0.0, 0.0), dtype=torch.float32, device=self.raw.device)
+            target = eye + quat_apply(wrist_quat.unsqueeze(0), forward.unsqueeze(0)).squeeze(0)
+
+        self.raw.sim.set_camera_view(
+            eye=tuple(float(v) for v in eye.detach().cpu().tolist()),
+            target=tuple(float(v) for v in target.detach().cpu().tolist()),
+        )
+
     def finish_episode(self, success: bool):
         return self.save_outputs(
             success=success,
@@ -217,11 +257,17 @@ class DualFrankaPegTransferTask(IsaacDualFrankaMotionMixin, SyntheticDataBaseTas
                 "extract_steps": self.extract_steps,
                 "approach_height": self.approach_height,
                 "pull_height": self.pull_height,
+                "release_lift_height": self.release_lift_height,
+                "release_lift_steps": self.release_lift_steps,
                 "home_steps": self.home_steps,
                 "gripper_steps": self.gripper_steps,
                 "robot2_ik_substeps": self.robot2_ik_substeps,
                 "hold_steps": self.hold_steps,
                 "table_length": self.table_length,
+                "wrist_camera_model": "Intel RealSense D455 USD asset",
+                "wrist_camera_source": args_cli.record_camera,
+                "wrist_camera_translate": list(args_cli.wrist_camera_translate),
+                "wrist_camera_rotate_zyx": list(args_cli.wrist_camera_rotate_zyx),
             },
         )
 
@@ -248,6 +294,7 @@ class DualFrankaPegTransferTask(IsaacDualFrankaMotionMixin, SyntheticDataBaseTas
         return {
             str(self.PHASE_INSERT): "franka1_insert_policy",
             str(self.PHASE_FRANKA1_RELEASE_HOME): "franka1_release_and_home",
+            str(self.PHASE_FRANKA1_RELEASE_LIFT): "franka1_release_vertical_lift",
             str(self.PHASE_FRANKA2_PREGRASP): "franka2_move_to_pregrasp",
             str(self.PHASE_FRANKA2_DESCEND): "franka2_vertical_descend_to_grasp",
             str(self.PHASE_FRANKA2_GRASP): "franka2_grasp_peg",
@@ -281,6 +328,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         extract_steps=args_cli.extract_steps,
         approach_height=args_cli.approach_height,
         pull_height=args_cli.pull_height,
+        release_lift_height=args_cli.release_lift_height,
+        release_lift_steps=args_cli.release_lift_steps,
         home_steps=args_cli.home_steps,
         gripper_steps=args_cli.gripper_steps,
         robot2_ik_substeps=args_cli.robot2_ik_substeps,
@@ -290,6 +339,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         output_dir=args_cli.output_dir,
         video_fps=args_cli.video_fps,
         video_frame_repeat=args_cli.video_frame_repeat,
+        record_camera=args_cli.record_camera,
         viewer_eye=args_cli.viewer_eye,
         viewer_lookat=args_cli.viewer_lookat,
     )

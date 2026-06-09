@@ -1,0 +1,15 @@
+#usda 1.0
+(
+    defaultPrim = "ur5e"
+    upAxis = "Z"
+    metersPerUnit = 1
+)
+
+def Xform "ur5e" (
+    prepend references = @/home/user/issacsim/Assets/Isaac/5.1/Isaac/Robots/UniversalRobots/ur5e/ur5e.usd@
+    variantSelections = {
+        string Gripper = "Robotiq_2f_85"
+    }
+)
+{
+}

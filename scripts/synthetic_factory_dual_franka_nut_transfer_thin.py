@@ -115,12 +115,13 @@ from internutopia_extension.tasks.synthetic_base_task import (
     configure_viewer,
     create_rl_games_checkpoint_skill,
 )
+from factory_dual_franka_peg_transfer_atomic_skills import FactoryPegTransferAtomicSkills
 
 
 register_dual_franka_factory_nut_env()
 
 
-class DualFrankaNutTransferTask(IsaacDualFrankaMotionMixin, SyntheticDataBaseTask):
+class DualFrankaNutTransferTask(FactoryPegTransferAtomicSkills, IsaacDualFrankaMotionMixin, SyntheticDataBaseTask):
     PHASE_FRANKA1_THREAD = 0
     PHASE_FRANKA1_RELEASE_HOME = 1
     PHASE_FRANKA1_RELEASE_LIFT = 2
@@ -175,21 +176,54 @@ class DualFrankaNutTransferTask(IsaacDualFrankaMotionMixin, SyntheticDataBaseTas
         self._peg_grasp_quat = None
         self._franka1_hold_joint_pos = None
         self._robot2_hold_joint_pos = None
+        self.franka1_home_joint_pos = FRANKA_RESET_JOINT_POS
+        self.franka2_home_joint_pos = ROBOT2_INITIAL_JOINT_POS
 
     def play_once(self):
         obs = self.reset_scene()
         self.table_length = self.measure_table_length()
         self.prepare_robot2_home_hold(ROBOT2_INITIAL_JOINT_POS)
 
-        self.run_checkpoint_policy_with_holds(
+        _, threaded = self.thread_nut(
             obs=obs,
-            phase=self.PHASE_FRANKA1_THREAD,
+            robot="franka1",
+            hole_marker="hole",
             max_steps=self.thread_steps,
-            stop_on_success=False,
         )
-        threaded = self.check_threaded(require=False)
-        self.franka1_release_lift_and_home()
-        self.franka2_grasp_unthread_lift_and_home()
+        self.release_lift(
+            robot="franka1",
+            lift_height=self.release_lift_height,
+        )
+        self.return_home(robot="franka1")
+        self.grasp(
+            robot="franka2",
+            target_marker="held_pos",
+            pregrasp_distance=self.approach_height,
+            move_steps=self.robot2_move_steps,
+            grasp_z_offset=self.robot2_grasp_z_offset,
+            closed_width=self.robot2_closed_gripper_width,
+            preturn_turns=self.robot2_preturn_turns,
+            preturn_steps=self.robot2_preturn_steps,
+            preturn_direction=1.0,
+            preturn_phase=self.PHASE_FRANKA2_PRETURN,
+        )
+        self.unthread(
+            robot="franka2",
+            turns=self.robot2_unthread_turns,
+            steps=self.unthread_steps,
+            gripper_width=self.robot2_closed_gripper_width,
+            direction=-1.0,
+        )
+        self.lift_vertical(
+            robot="franka2",
+            lift_height=self.lift_height,
+            steps=self.robot2_move_steps,
+            gripper_width=self.robot2_closed_gripper_width,
+        )
+        self.return_home(
+            robot="franka2",
+            gripper_width=self.robot2_closed_gripper_width,
+        )
 
         unthreaded = self.check_unthreaded()
         success = threaded and unthreaded
@@ -208,101 +242,6 @@ class DualFrankaNutTransferTask(IsaacDualFrankaMotionMixin, SyntheticDataBaseTas
             "phase_names": self.phase_names(),
         }
         return self.info
-
-    def franka2_grasp_unthread_lift_and_home(self):
-        self.raw._compute_intermediate_values(self.raw.physics_dt)
-        nut_pos = self.raw.held_pos.clone()
-        down_quat = self.robot2_down_quat()
-        grasp_pos = self.robot2_grasp_actor(
-            peg_pos=nut_pos,
-            target_quat=down_quat,
-            pregrasp_height=self.approach_height,
-            grasp_z_offset=self.robot2_grasp_z_offset,
-            move_steps=self.robot2_move_steps,
-            pregrasp_phase=self.PHASE_FRANKA2_PREGRASP,
-            descend_phase=self.PHASE_FRANKA2_DESCEND,
-            grasp_phase=self.PHASE_FRANKA2_GRASP,
-            closed_width=self.robot2_closed_gripper_width,
-            preturn_turns=self.robot2_preturn_turns,
-            preturn_steps=self.robot2_preturn_steps,
-            preturn_direction=1.0,
-            preturn_phase=self.PHASE_FRANKA2_PRETURN,
-        )
-        self.robot2_reverse_twist_wrist_joint(
-            turns=self.robot2_unthread_turns,
-            phase=self.PHASE_FRANKA2_UNTHREAD,
-            steps=self.unthread_steps,
-            gripper_width=self.robot2_closed_gripper_width,
-            direction=-1.0,
-        )
-        self.raw._compute_intermediate_values(self.raw.physics_dt)
-        lift_pos = self.raw.robot2_fingertip_midpoint_pos.clone()
-        lift_pos[:, 2] += self.lift_height
-        lift_quat = self.raw.robot2_fingertip_midpoint_quat.clone()
-        self.robot2_move_to_pose(
-            lift_pos,
-            lift_quat,
-            self.robot2_move_steps,
-            self.PHASE_FRANKA2_LIFT,
-            gripper_width=self.robot2_closed_gripper_width,
-        )
-        self.hold_targets(self.hold_steps, self.PHASE_FRANKA2_LIFT)
-
-        env_ids = self.env_ids()
-        home_target = self.raw._robot2.data.joint_pos[env_ids].clone()
-        home_target[:, 0:7] = self.tensor_joint_pos(ROBOT2_INITIAL_JOINT_POS)
-        home_target[:, 7:] = self.robot2_closed_gripper_width
-        self.execute_joint_trajectory(
-            self.raw._robot2,
-            home_target,
-            self.raw.robot2_ctrl_target_joint_pos,
-            env_ids,
-            self.home_steps,
-            self.PHASE_FRANKA2_HOME,
-        )
-        self.hold_targets(self.hold_steps, self.PHASE_FRANKA2_HOME)
-
-    def franka1_release_lift_and_home(self):
-        env_ids = self.env_ids()
-        gripper_width = self.raw.cfg_task.held_asset_cfg.diameter / 2 * 1.25
-
-        current = self.raw._robot.data.joint_pos[env_ids].clone()
-        open_target = current.clone()
-        open_target[:, 7:] = gripper_width
-        self.execute_joint_trajectory(
-            self.raw._robot,
-            open_target,
-            self.raw.ctrl_target_joint_pos,
-            env_ids,
-            self.gripper_steps,
-            self.PHASE_FRANKA1_RELEASE_HOME,
-        )
-
-        self.raw._compute_intermediate_values(self.raw.physics_dt)
-        lift_pos = self.raw.fingertip_midpoint_pos.clone()
-        lift_pos[:, 2] += self.release_lift_height
-        lift_quat = self.raw.fingertip_midpoint_quat.clone()
-        self.franka1_move_to_pose(
-            lift_pos,
-            lift_quat,
-            self.release_lift_steps,
-            self.PHASE_FRANKA1_RELEASE_LIFT,
-            gripper_width=gripper_width,
-        )
-        self.hold_targets(self.hold_steps, self.PHASE_FRANKA1_RELEASE_LIFT)
-
-        home_target = self.raw._robot.data.joint_pos[env_ids].clone()
-        home_target[:, 0:7] = self.tensor_joint_pos(FRANKA_RESET_JOINT_POS)
-        home_target[:, 7:] = gripper_width
-        self.execute_joint_trajectory(
-            self.raw._robot,
-            home_target,
-            self.raw.ctrl_target_joint_pos,
-            env_ids,
-            self.home_steps,
-            self.PHASE_FRANKA1_RELEASE_HOME,
-        )
-        self.hold_targets(self.hold_steps, self.PHASE_FRANKA1_RELEASE_HOME)
 
     def check_threaded(self, require: bool = True) -> bool:
         self.raw._compute_intermediate_values(self.raw.physics_dt)
