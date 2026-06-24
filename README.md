@@ -10,6 +10,31 @@ separately on HuggingFace.
 
 [Watch the demo video](video/factory_dual_franka_peg_transfer_planned_20260520_091622_success.mp4)
 
+## LLM End-to-End Data Synthesis Demo
+
+Demo video:
+
+```text
+factory_dual_franka_peg_transfer_bundle/demo/LLM_generate_data.mp4
+```
+
+This demo shows the terminal flow from natural-language task request to atomic skill prompt, generated task script, IsaacLab rollout, and final HDF5/MP4 output paths.
+
+Set the LLM key through an environment variable. Do not hard-code it:
+
+```bash
+export DEEPSEEK_API_KEY="your_key_here"
+```
+
+Run from the bundle root after installing IsaacLab/Isaac Sim:
+
+```bash
+source /data/user/isaacsim/setup_conda_env.sh
+python scripts/demo_llm_synthesize_peg_transfer.py --run
+```
+
+A reusable Chinese request is included in the bundle README.
+
 ## Contents
 
 - `scripts/synthetic_factory_dual_franka_peg_transfer_thin.py`

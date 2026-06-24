@@ -14,6 +14,12 @@ separately on HuggingFace.
   - Franka2 nut grasp height is shifted down by `5 mm`.
 - `scripts/factory_dual_franka_peg_transfer_atomic_skills.py`
   - Shared task-level skills used by both thin entrypoints.
+- `scripts/demo_llm_synthesize_peg_transfer.py`
+  - Terminal-first LLM demo: natural-language task description -> atomic skill prompt -> generated task script -> IsaacLab rollout -> HDF5/MP4 output.
+- `prompts/factory_dual_franka_peg_transfer_atomic_skills.md`
+  - Atomic skill interface and canonical sequence passed to the LLM.
+- `demo/LLM_generate_data.mp4`
+  - Screen-recorded demo of the end-to-end LLM synthesis flow.
 - `internutopia_extension/tasks/synthetic_base_task.py`
   - Checkpoint loading, reset, recording, HDF5, and MP4 helpers.
 - `internutopia_extension/tasks/isaac_motion_primitives.py`
@@ -24,6 +30,8 @@ separately on HuggingFace.
     and Gym registration for peg and nut tasks.
 - `asset/desk005/`
   - Desk USD and material resource used by the task.
+- `asset/factory/`
+  - Local copies of IsaacLab Factory USD assets downloaded from the Isaac 4.5 cloud asset source: `factory_hole_8mm.usd`, `factory_peg_8mm.usd`, `factory_nut_m16.usd`, `factory_bolt_m16.usd`, and `franka_mimic.usd`.
 - `asset/franka/` and `asset/ur5e_robotiq/`
   - D455 wrist-camera wrapper and payload assets used by `franka1_d455` and
     `franka2_d455` recording modes.
@@ -93,6 +101,62 @@ python scripts/synthetic_factory_dual_franka_nut_transfer_thin.py \
 ```
 
 The script writes HDF5 and MP4 files to the `--output_dir` path.
+
+## LLM End-to-End Data Synthesis Demo
+
+Demo video:
+
+```text
+demo/LLM_generate_data.mp4
+```
+
+The demo shows the full terminal flow:
+
+1. Print the natural-language task request.
+2. Print the atomic skill spec sent to the LLM.
+3. Generate a runnable `play_once` and scene setup script.
+4. Run the generated IsaacLab script.
+5. Print whether synthesis succeeded and where the HDF5/MP4 files were saved.
+
+Set the LLM key through an environment variable. Do not hard-code it:
+
+```bash
+export DEEPSEEK_API_KEY="your_key_here"
+```
+
+Example reusable natural-language request:
+
+```text
+请合成一段双机械臂具身数据：两个 Franka 机械臂相对而立于桌面两侧，桌面中央有一个 hole。Franka1 初始手持 peg，并将 peg 插入 hole 中；随后 Franka1 松开并回到初始位姿，Franka2 移动到 peg 上方，抓取已经插入的 peg，并将 peg 从 hole 中取出。请使用当前 Factory dual-Franka 场景、原子技能接口和 HDF5/MP4 记录格式生成可运行脚本。
+```
+
+Run the demo from the repo root:
+
+```bash
+source /data/user/isaacsim/setup_conda_env.sh
+python scripts/demo_llm_synthesize_peg_transfer.py \
+  --request "请合成一段双机械臂具身数据：两个 Franka 机械臂相对而立于桌面两侧，桌面中央有一个 hole。Franka1 初始手持 peg，并将 peg 插入 hole 中；随后 Franka1 松开并回到初始位姿，Franka2 移动到 peg 上方，抓取已经插入的 peg，并将 peg 从 hole 中取出。请使用当前 Factory dual-Franka 场景、原子技能接口和 HDF5/MP4 记录格式生成可运行脚本。" \
+  --run
+```
+
+For a no-network smoke test that still prints the same terminal sections and uses the known-good task template:
+
+```bash
+source /data/user/isaacsim/setup_conda_env.sh
+python scripts/demo_llm_synthesize_peg_transfer.py --offline --run
+```
+
+Generated task scripts are written to:
+
+```text
+scripts/llm_generated_dual_franka_peg_transfer_<timestamp>.py
+```
+
+Generated datasets/videos are written to:
+
+```text
+outputs/llm_demo/factory_dual_franka_peg_transfer/
+```
 
 ## Checkpoint
 
