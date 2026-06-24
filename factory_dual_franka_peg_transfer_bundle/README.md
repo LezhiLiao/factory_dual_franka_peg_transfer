@@ -20,6 +20,8 @@ separately on HuggingFace.
   - Atomic skill interface and canonical sequence passed to the LLM.
 - `demo/LLM_generate_data.mp4`
   - Screen-recorded demo of the end-to-end LLM synthesis flow.
+- `demo/LLM_generate_data_preview.png`
+  - Clickable preview image used by the README to link to the demo video.
 - `internutopia_extension/tasks/synthetic_base_task.py`
   - Checkpoint loading, reset, recording, HDF5, and MP4 helpers.
 - `internutopia_extension/tasks/isaac_motion_primitives.py`
@@ -104,11 +106,9 @@ The script writes HDF5 and MP4 files to the `--output_dir` path.
 
 ## LLM End-to-End Data Synthesis Demo
 
-Demo video:
+[![LLM End-to-End Data Synthesis Demo](demo/LLM_generate_data_preview.png)](demo/LLM_generate_data.mp4)
 
-```text
-demo/LLM_generate_data.mp4
-```
+[Download or watch the LLM demo video](demo/LLM_generate_data.mp4)
 
 The demo shows the full terminal flow:
 

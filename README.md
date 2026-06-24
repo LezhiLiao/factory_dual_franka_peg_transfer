@@ -12,11 +12,9 @@ separately on HuggingFace.
 
 ## LLM End-to-End Data Synthesis Demo
 
-Demo video:
+[![LLM End-to-End Data Synthesis Demo](factory_dual_franka_peg_transfer_bundle/demo/LLM_generate_data_preview.png)](factory_dual_franka_peg_transfer_bundle/demo/LLM_generate_data.mp4)
 
-```text
-factory_dual_franka_peg_transfer_bundle/demo/LLM_generate_data.mp4
-```
+[Download or watch the LLM demo video](factory_dual_franka_peg_transfer_bundle/demo/LLM_generate_data.mp4)
 
 This demo shows the terminal flow from natural-language task request to atomic skill prompt, generated task script, IsaacLab rollout, and final HDF5/MP4 output paths.
 
